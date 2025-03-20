@@ -1,4 +1,10 @@
 **/.env
 **/CCFD
 fraudTest.csv
+fraudTrain.csv
+Test_Process_Data.csv
+Train_Process_Data.csv
 **/.ipynb_checkpoints
+**/train_processed_data.csv
+**/test_processed_data.csv
+/kafka
