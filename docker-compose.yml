@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  pyspark:
+    build: .
+    container_name: pyspark_env
+    ports:
+      - "8888:8888"  # Jupyter Notebook
+    volumes:
+      - .:/app
