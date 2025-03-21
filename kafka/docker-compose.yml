@@ -8,6 +8,8 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    networks:
+      - fraud-detection-network
 
   kafka:
     image: confluentinc/cp-kafka:latest
@@ -20,6 +22,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9092:9092"
+    networks:
+      - fraud-detection-network
 
   producer:
     build:
@@ -31,6 +35,8 @@ services:
       - .:/app
     environment:
       KAFKA_BROKER: kafka:9092
+    networks:
+      - fraud-detection-network
 
   consumer:
     build:
@@ -42,3 +48,9 @@ services:
       - .:/app
     environment:
       KAFKA_BROKER: kafka:9092
+    networks:
+      - fraud-detection-network
+
+networks:
+  fraud-detection-network:
+    external: true
