@@ -1,0 +1,18 @@
+# Use a prebuilt PySpark image
+FROM bitnami/spark:3.5.0
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the consumer script and the fraud detection model directory
+COPY consumer.py .
+COPY fraud_detection_model /app/fraud_detection_model
+
+# Run the consumer script
+CMD ["python", "consumer.py"]

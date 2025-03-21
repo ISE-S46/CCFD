@@ -7,4 +7,3 @@ Train_Process_Data.csv
 **/.ipynb_checkpoints
 **/train_processed_data.csv
 **/test_processed_data.csv
-/kafka
