@@ -14,4 +14,5 @@ Create credit-card-transactions topic in Kafka
 - kafka-topics --list --bootstrap-server localhost:9092
 
 Grafana, PostgreSQL Docker Container setup(Window):
+- docker network create fraud-detection-network
 - docker-compose -f Database/docker-compose.yml up -d
