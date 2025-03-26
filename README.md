@@ -7,7 +7,7 @@ This project is a project based learning, utilising:
 - Kafka
 - PostgreSQL
 - Grafana
-- Docker.
+- Docker
 
 **Data set used for this project**
 - https://www.kaggle.com/datasets/kartik2112/fraud-detection?resource=download
@@ -49,8 +49,8 @@ docker exec -it kafka-kafka-1 /bin/bash
 ```
 if there is no credit-card-transactions:
 ```bash
-- kafka-topics --create --topic credit-card-transactions --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
-- kafka-topics --list --bootstrap-server localhost:9092
+kafka-topics --create --topic credit-card-transactions --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
+kafka-topics --list --bootstrap-server localhost:9092
 ```
 Manually add PostgreSQL datasource to grafana:
 - insert photo later
