@@ -24,7 +24,7 @@ This project is a project based learning, utilising:
 - VSCode
 - Python
 
-##Installation
+## Installation
 
 Jupyter/Pyspark-notebook Docker Container setup:
 ```bash
