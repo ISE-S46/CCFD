@@ -9,9 +9,6 @@ This project is a project based learning, utilising:
 - Grafana
 - Docker
 
-**Data set used for this project**
-- https://www.kaggle.com/datasets/kartik2112/fraud-detection?resource=download
-
 ## Features
 - **Data Processing**: Cleans, transforms, and prepares data for analysis.
 - **Machine Learning**: Train LogisticRegression, RandomForest, and GradientBoostTree Model, with the processed data and select the best performed model.
@@ -41,6 +38,23 @@ docker run -it -p 8888:8888 -v ${pwd}:/app --name pyspark_env pyspark_env
 ```
 ### Access JupyterLab at http://localhost:8888 
 ![JupyterWithPyspark](ReadmeImg/Jupyter.png)
+
+### Download the datasets
+#### Both fruadTest.csv and fruafTrain.csv
+https://www.kaggle.com/datasets/kartik2112/fraud-detection?resource=download
+
+### Preprocess Data:
+Run Train_Data_Process.ipynb and Test_Process_Data.ipynb in Jupyterlab then rename .csv file in Test_Process_Data folder as Test_Process_Data.csv and Train_Process_Data folder as Train_Process_Data.csv
+
+Copy Test_Process_Data.csv to kafka folder and Train_Process_Data.csv to outside of Train_Process_Data folder.
+
+### Train Model (Optional):
+Run Train_Model.ipynb in JupyterLab and you'll get new fraud_detection_model folder.
+
+Optional: Run Test_Model.ipynb to check model performance.
+
+
+Replace fraud_detection_model folder in kafka with the new fraud_detection_model folder.
 
 ### Grafana, PostgreSQL Docker Container setup:
 ```bash
