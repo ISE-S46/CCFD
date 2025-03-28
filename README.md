@@ -23,7 +23,7 @@ This project is a project based learning, utilising:
 - VSCode
 - Python
 
-## Datasets used:
+### Datasets used:
 https://www.kaggle.com/datasets/kartik2112/fraud-detection?resource=download
 
 ## Installation
