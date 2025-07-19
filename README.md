@@ -37,13 +37,13 @@ cd ccfd
 ### Jupyter/Pyspark-notebook Docker Container setup:
 ```bash
 docker build -t pyspark_env .
-docker run -it -p 8888:8888 -v ${pwd}:/app --name pyspark_env pyspark_env
+docker run -d -p 8888:8888 -v ${pwd}:/app -p 4040:4040 --name pyspark_env pyspark_env 
 ```
 ### Access JupyterLab at http://localhost:8888 
 ![JupyterWithPyspark](ReadmeImg/Jupyter.png)
 
 ### Download the datasets
-#### Both fruadTest.csv and fruafTrain.csv
+#### Both fruadTest.csv and fruafTrain.csv from
 https://www.kaggle.com/datasets/kartik2112/fraud-detection?resource=download
 
 ### Preprocess Data:
