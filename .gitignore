@@ -1,5 +1,6 @@
 .env
 **/.ipynb_checkpoints
 **/artifacts
+**/Pipeline
 fraudTest.csv
 fraudTrain.csv
