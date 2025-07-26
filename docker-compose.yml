@@ -1,6 +1,6 @@
 services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:${ZOOKEEPER_IMAGE_VERSION}
+    image: confluentinc/cp-zookeeper:7.6.1
     hostname: zookeeper
     container_name: zookeeper
     ports:
@@ -20,7 +20,7 @@ services:
       retries: 3
 
   kafka:
-    image: confluentinc/cp-kafka:${KAFKA_IMAGE_VERSION}
+    image: confluentinc/cp-kafka:7.6.1
     hostname: kafka
     container_name: kafka
     ports:
@@ -50,14 +50,13 @@ services:
     build:
       context: ./kafka
       dockerfile: Dockerfile.producer
-      args:
-        PYTHON_IMAGE_VERSION: ${PYTHON_IMAGE_VERSION}
     container_name: fraud-producer
     depends_on:
       kafka:
         condition: service_healthy
     volumes:
       - ./${PRODUCER_CSV_FILE}:/app/${PRODUCER_CSV_FILE}
+      - producer_data:/app/data
     environment:
       KAFKA_BROKER_URL: kafka:29092
       KAFKA_TOPIC_NAME: ${KAFKA_TOPIC_NAME}
@@ -66,7 +65,7 @@ services:
     restart: unless-stopped
 
   spark-master:
-    image: bitnami/spark:${SPARK_IMAGE_VERSION}
+    image: bitnami/spark:4.0.0
     hostname: spark-master
     container_name: spark-master
     ports:
@@ -85,8 +84,6 @@ services:
     build:
       context: ./kafka
       dockerfile: Dockerfile.worker
-      args:
-        SPARK_IMAGE_VERSION: ${SPARK_IMAGE_VERSION}
     hostname: spark-worker
     container_name: spark-worker
     depends_on:
@@ -103,15 +100,36 @@ services:
     networks:
       - CCFD-net
 
+  postgres:
+    image: postgres:17
+    hostname: postgres
+    container_name: fraud-db
+    ports:
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+      - ./Database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - CCFD-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   spark-consumer:
     build:
       context: ./kafka
       dockerfile: Dockerfile.consumer
-      args:
-        SPARK_IMAGE_VERSION: ${SPARK_IMAGE_VERSION}
     container_name: fraud-consumer
     depends_on:
       - kafka
+      - postgres
+      - producer
     environment:
       KAFKA_BROKER_URL: kafka:29092
       KAFKA_TOPIC_NAME: ${KAFKA_TOPIC_NAME}
@@ -126,8 +144,20 @@ services:
       SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER: ${SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER}
       SPARK_SERIALIZER: ${SPARK_SERIALIZER}
       SPARK_KAFKA_PACKAGE_VERSION: ${SPARK_KAFKA_PACKAGE_VERSION}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      CONSUMER_CHECKPOINT_PATH: /app/spark_checkpoints
+      SPARK_LOCAL_DIRS: /tmp/spark-local
+      HOME: /home/sparkuser
+      # Additional environment variables for proper checkpoint handling
+      SPARK_SQL_WAREHOUSE_DIR: /tmp/spark-warehouse
+      HADOOP_HOME: /opt/bitnami/spark
     volumes:
       - ./kafka/consumer.py:/app/consumer.py
+      - consumer_checkpoints:/app/spark_checkpoints
     networks:
       - CCFD-net
     deploy:
@@ -136,6 +166,8 @@ services:
           memory: 4G
         reservations:
           memory: 2G
+    # Add user specification to ensure proper permissions
+    user: "1001:1001"
     command: >
       /opt/bitnami/spark/bin/spark-submit
       --master ${SPARK_MASTER_URL}
@@ -146,6 +178,9 @@ services:
       --conf spark.executor.cores=${SPARK_EXECUTOR_CORES}
       --conf spark.driver.maxResultSize=${SPARK_DRIVER_MAX_RESULT_SIZE}
       --conf spark.serializer=${SPARK_SERIALIZER}
+      --conf spark.sql.streaming.checkpointLocation=/app/spark_checkpoints
+      --conf spark.local.dir=/tmp/spark-local
+      --conf spark.sql.warehouse.dir=/tmp/spark-warehouse
       /app/consumer.py
 
 volumes:
@@ -153,6 +188,12 @@ volumes:
     name: CCFD-zookeeper-data
   zookeeper_log:
     name: CCFD-zookeeper-log
+  postgresql_data:
+    name: CCFD-postgresql-data
+  consumer_checkpoints:
+    name: CCFD-consumer-checkpoints
+  producer_data:
+    name: CCFD-producer-data
 
 networks:
   CCFD-net:

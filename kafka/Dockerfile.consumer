@@ -1,5 +1,4 @@
-ARG SPARK_IMAGE_VERSION
-FROM bitnami/spark:${SPARK_IMAGE_VERSION}
+FROM bitnami/spark:4.0.0
 
 USER root
 
@@ -9,18 +8,27 @@ RUN pip install --no-cache-dir -r consumer_requirements.txt
 COPY Pipeline /app/Pipeline
 COPY consumer.py .
 
-RUN mkdir -p /app/Pipeline/checkpoints && \
+RUN mkdir -p /home/sparkuser && \
+    mkdir -p /app/spark_checkpoints && \
+    mkdir -p /app/Pipeline/checkpoints && \
     mkdir -p /tmp/spark-local && \
     mkdir -p /tmp/spark-warehouse && \
     mkdir -p /tmp/checkpoints && \
     mkdir -p /tmp/derby && \
+    mkdir -p /tmp/spark-events && \
+    mkdir -p /tmp/hive && \
+    chown -R 1001:1001 /home/sparkuser && \
     chown -R 1001:1001 /app && \
     chown -R 1001:1001 /tmp && \
+    chmod -R 755 /home/sparkuser && \
     chmod -R 755 /app && \
     chmod -R 755 /tmp
 
 USER 1001
 
+ENV HOME=/home/sparkuser
 ENV SPARK_HOME=/opt/bitnami/spark
 ENV PATH=$SPARK_HOME/bin:$PATH
 ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.7-src.zip:$PYTHONPATH
+ENV SPARK_LOCAL_DIRS=/tmp/spark-local
+ENV SPARK_SQL_WAREHOUSE_DIR=/tmp/spark-warehouse

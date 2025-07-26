@@ -1,5 +1,4 @@
-ARG SPARK_IMAGE_VERSION
-FROM bitnami/spark:${SPARK_IMAGE_VERSION}
+FROM bitnami/spark:4.0.0
 
 WORKDIR /app
 COPY consumer_requirements.txt .

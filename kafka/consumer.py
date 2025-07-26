@@ -10,6 +10,8 @@ from pyspark.sql.types import (
 from pyspark.ml import PipelineModel
 import os
 import sys
+import psycopg2
+from psycopg2 import extras
 
 KAFKA_BROKER_URL = os.getenv('KAFKA_BROKER_URL', 'kafka:29092')
 TOPIC_NAME = os.getenv('KAFKA_TOPIC_NAME', 'raw_transactions')
@@ -28,13 +30,11 @@ SPARK_STREAMING_TRIGGER_TIME = os.getenv('SPARK_STREAMING_TRIGGER_TIME', '10 sec
 SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER = os.getenv('SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER', '1000')
 CONSUMER_FRAUD_THRESHOLD = float(os.getenv('CONSUMER_FRAUD_THRESHOLD', '0.75'))
 
-# Create a custom temp directory for Spark
-custom_temp_dir = os.getenv('SPARK_LOCAL_DIRS', '/tmp/spark-custom')
-os.makedirs(custom_temp_dir, exist_ok=True)
-os.makedirs(CHECKPOINT_PATH, exist_ok=True)
-
-# Set Java system properties before creating SparkSession
-os.environ['SPARK_LOCAL_DIRS'] = custom_temp_dir
+PG_DB = os.getenv('POSTGRES_DB')
+PG_USER = os.getenv('POSTGRES_USER')
+PG_PASSWORD = os.getenv('POSTGRES_PASSWORD')
+PG_HOST = os.getenv('POSTGRES_HOST')
+PG_PORT = os.getenv('POSTGRES_PORT')
 
 print("Setting up Spark Session...")
 
@@ -47,12 +47,13 @@ try:
         .config("spark.executor.memory", SPARK_EXECUTOR_MEMORY) \
         .config("spark.executor.cores", SPARK_EXECUTOR_CORES) \
         .config("spark.driver.maxResultSize", SPARK_DRIVER_MAX_RESULT_SIZE) \
-        .config("spark.local.dir", custom_temp_dir) \
-        .config("spark.sql.warehouse.dir", f"{custom_temp_dir}/warehouse") \
         .config("spark.sql.streaming.metricsEnabled", "true") \
         .config("spark.sql.adaptive.enabled", "false") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "false") \
         .config("spark.serializer", SPARK_SERIALIZER) \
+        .config("spark.sql.streaming.forceDeleteTempCheckpointLocation", "true") \
+        .config("spark.sql.streaming.checkpointLocation.deletedFileRetention", "100") \
+        .config("spark.sql.execution.arrow.pyspark.enabled", "false") \
         .getOrCreate()
     
     print("Spark Session created successfully in local mode")
@@ -144,9 +145,12 @@ kafka_stream_df = spark \
     .format("kafka") \
     .option("kafka.bootstrap.servers", KAFKA_BROKER_URL) \
     .option("subscribe", TOPIC_NAME) \
-    .option("startingOffsets", "latest") \
+    .option("startingOffsets", "earliest") \
     .option("failOnDataLoss", "false") \
     .option("maxOffsetsPerTrigger", SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER) \
+    .option("kafka.session.timeout.ms", "30000") \
+    .option("kafka.request.timeout.ms", "40000") \
+    .option("kafka.max.poll.records", "500") \
     .load()
 
 print("Connected to Kafka successfully")

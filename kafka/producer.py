@@ -9,6 +9,7 @@ import os
 KAFKA_BROKER_URL = os.getenv('KAFKA_BROKER_URL', 'kafka:29092')
 TOPIC_NAME = os.getenv('KAFKA_TOPIC_NAME', 'raw_transactions')
 CSV_FILE_PATH = os.getenv('PRODUCER_CSV_FILE', 'fraudTest.csv')
+OFFSET_FILE_PATH = '/app/data/producer_offset.txt'
 
 def create_kafka_producer():
     try:
@@ -26,12 +27,35 @@ def create_kafka_producer():
         print(f"Error connecting to Kafka: {e}")
         sys.exit(1)
 
+def get_last_offset():
+    try:
+        if os.path.exists(OFFSET_FILE_PATH):
+            with open(OFFSET_FILE_PATH, 'r') as f:
+                offset = int(f.read().strip())
+                print(f"Resuming from row {offset + 1}")
+                return offset
+        else:
+            print("No offset file found, starting from beginning")
+            return -1
+    except Exception as e:
+        print(f"Error reading offset file: {e}, starting from beginning")
+        return -1
+
+def save_offset(row_number):
+    try:
+        os.makedirs(os.path.dirname(OFFSET_FILE_PATH), exist_ok=True)
+        with open(OFFSET_FILE_PATH, 'w') as f:
+            f.write(str(row_number))
+    except Exception as e:
+        print(f"Error saving offset: {e}")
+
 def produce_messages(producer):
     print(f"Starting to read from {CSV_FILE_PATH} and send to topic {TOPIC_NAME}")
 
     last_transaction_time = None
     first_transaction_wall_time = time.time()
-
+    last_offset = get_last_offset()
+    
     try:
         with open(CSV_FILE_PATH, mode='r', encoding='utf-8') as file:
             csv_reader = csv.DictReader(file)
@@ -40,7 +64,17 @@ def produce_messages(producer):
                 print("Error: 'trans_date_trans_time' column not found in CSV header.")
                 sys.exit(1)
 
-            for i, row in enumerate(csv_reader):
+            # Convert to list to allow skipping rows
+            rows = list(csv_reader)
+            total_rows = len(rows)
+            
+            print(f"Total rows in CSV: {total_rows}")
+            print(f"Starting from row: {last_offset + 1}")
+
+            for i, row in enumerate(rows):
+                if i <= last_offset:
+                    continue
+                    
                 try:
                     # Numeric conversions
                     row['amt'] = float(row.get('amt', 0.0))
@@ -81,19 +115,30 @@ def produce_messages(producer):
                     producer.send(TOPIC_NAME, value=row)
 
                     if i % 10 == 0:
-                        print(f"Sent {i+1} messages. Last message trans_num: {row['trans_num']} at {current_trans_time_str}")
+                        save_offset(i)
+                        print(f"Sent {i+1} messages (total processed: {i - last_offset}). Last message trans_num: {row['trans_num']} at {current_trans_time_str}")
+
+                    if i == len(rows) - 1:
+                        save_offset(i)
 
                 except ValueError as ve:
                     print(f"Skipping row {i+1} due to data type conversion error: {ve} - Row: {row}")
+                    save_offset(i) 
                 except Exception as e:
                     print(f"Error sending message for row {i+1}: {e}")
+                    save_offset(i)
+
+            print(f"Finished processing all rows. Final offset saved: {len(rows) - 1}")
 
     except FileNotFoundError:
         print(f"Error: CSV file not found at {CSV_FILE_PATH}")
         sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nReceived interrupt signal, saving current progress...")
+        sys.exit(0)
     finally:
         producer.flush()
-        total_wall_time = time.time() - first_transaction_wall_time # Calculate total time
+        total_wall_time = time.time() - first_transaction_wall_time
         print(f"\nFinished sending messages. Total wall clock time: {total_wall_time:.2f} seconds.")
 
 
