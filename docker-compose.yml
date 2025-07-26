@@ -1,0 +1,159 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:${ZOOKEEPER_IMAGE_VERSION}
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "${ZOOKEEPER_CLIENT_PORT}:${ZOOKEEPER_CLIENT_PORT}"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_CLIENT_PORT}
+      ZOOKEEPER_TICK_TIME: ${ZOOKEEPER_TICK_TIME}
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    networks:
+      - CCFD-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "${ZOOKEEPER_CLIENT_PORT}"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  kafka:
+    image: confluentinc/cp-kafka:${KAFKA_IMAGE_VERSION}
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID}
+      KAFKA_ZOOKEEPER_CONNECT: ${KAFKA_ZOOKEEPER_CONNECT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CLIENT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS}
+      KAFKA_LISTENERS: ${KAFKA_LISTENERS}
+      KAFKA_INTER_BROKER_LISTENER_NAME: ${KAFKA_INTER_BROKER_LISTENER_NAME}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: ${KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: ${KAFKA_AUTO_CREATE_TOPICS_ENABLE}
+    networks:
+      - CCFD-net
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  producer:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile.producer
+      args:
+        PYTHON_IMAGE_VERSION: ${PYTHON_IMAGE_VERSION}
+    container_name: fraud-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./${PRODUCER_CSV_FILE}:/app/${PRODUCER_CSV_FILE}
+    environment:
+      KAFKA_BROKER_URL: kafka:29092
+      KAFKA_TOPIC_NAME: ${KAFKA_TOPIC_NAME}
+    networks:
+      - CCFD-net
+    restart: unless-stopped
+
+  spark-master:
+    image: bitnami/spark:${SPARK_IMAGE_VERSION}
+    hostname: spark-master
+    container_name: spark-master
+    ports:
+      - "8080:8080" # Spark Master UI
+      - "7077:7077" # Spark Master internal communication
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: ${SPARK_RPC_AUTHENTICATION_ENABLED}
+      SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED}
+      SPARK_LOCAL_DIRS: ${SPARK_LOCAL_DIRS}
+      SPARK_LOG_DIR: ${SPARK_LOG_DIR}
+    networks:
+      - CCFD-net
+
+  spark-worker:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile.worker
+      args:
+        SPARK_IMAGE_VERSION: ${SPARK_IMAGE_VERSION}
+    hostname: spark-worker
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: ${SPARK_MASTER_URL}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
+      SPARK_RPC_AUTHENTICATION_ENABLED: ${SPARK_RPC_AUTHENTICATION_ENABLED}
+      SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED}
+      SPARK_LOCAL_DIRS: ${SPARK_LOCAL_DIRS}
+      SPARK_LOG_DIR: ${SPARK_LOG_DIR}
+    networks:
+      - CCFD-net
+
+  spark-consumer:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile.consumer
+      args:
+        SPARK_IMAGE_VERSION: ${SPARK_IMAGE_VERSION}
+    container_name: fraud-consumer
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER_URL: kafka:29092
+      KAFKA_TOPIC_NAME: ${KAFKA_TOPIC_NAME}
+      SPARK_MASTER_URL: ${SPARK_MASTER_URL}
+      CONSUMER_FRAUD_THRESHOLD: ${CONSUMER_FRAUD_THRESHOLD}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY}
+      SPARK_EXECUTOR_CORES: ${SPARK_EXECUTOR_CORES}
+      SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_SQL_SHUFFLE_PARTITIONS}
+      SPARK_DRIVER_MAX_RESULT_SIZE: ${SPARK_DRIVER_MAX_RESULT_SIZE}
+      SPARK_STREAMING_TRIGGER_TIME: ${SPARK_STREAMING_TRIGGER_TIME}
+      SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER: ${SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER}
+      SPARK_SERIALIZER: ${SPARK_SERIALIZER}
+      SPARK_KAFKA_PACKAGE_VERSION: ${SPARK_KAFKA_PACKAGE_VERSION}
+    volumes:
+      - ./kafka/consumer.py:/app/consumer.py
+    networks:
+      - CCFD-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    command: >
+      /opt/bitnami/spark/bin/spark-submit
+      --master ${SPARK_MASTER_URL}
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.13:${SPARK_KAFKA_PACKAGE_VERSION}
+      --conf spark.sql.shuffle.partitions=${SPARK_SQL_SHUFFLE_PARTITIONS}
+      --conf spark.driver.memory=${SPARK_DRIVER_MEMORY}
+      --conf spark.executor.memory=${SPARK_EXECUTOR_MEMORY}
+      --conf spark.executor.cores=${SPARK_EXECUTOR_CORES}
+      --conf spark.driver.maxResultSize=${SPARK_DRIVER_MAX_RESULT_SIZE}
+      --conf spark.serializer=${SPARK_SERIALIZER}
+      /app/consumer.py
+
+volumes:
+  zookeeper_data:
+    name: CCFD-zookeeper-data
+  zookeeper_log:
+    name: CCFD-zookeeper-log
+
+networks:
+  CCFD-net:
+    driver: bridge

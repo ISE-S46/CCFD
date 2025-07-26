@@ -1,0 +1,19 @@
+ARG PYTHON_IMAGE_VERSION
+FROM python:${PYTHON_IMAGE_VERSION}
+
+# Install netcat for network testing
+RUN apt-get update && apt-get install -y netcat-traditional && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY producer.py .
+
+RUN echo '#!/bin/bash\necho "Producer container is running"\npython -c "import kafka; print(\"Kafka library available\")"' > /app/healthcheck.sh && chmod +x /app/healthcheck.sh
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /app/healthcheck.sh
+
+CMD ["python", "-u", "producer.py"]

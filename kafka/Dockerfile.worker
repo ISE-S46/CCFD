@@ -1,0 +1,12 @@
+ARG SPARK_IMAGE_VERSION
+FROM bitnami/spark:${SPARK_IMAGE_VERSION}
+
+WORKDIR /app
+COPY consumer_requirements.txt .
+RUN pip install --no-cache-dir -r consumer_requirements.txt
+COPY Pipeline /app/Pipeline
+
+USER root
+RUN chown -R 1001:1001 /app/Pipeline && \
+    chmod -R 755 /app/Pipeline
+USER 1001
