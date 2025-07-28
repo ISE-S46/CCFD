@@ -10,6 +10,7 @@ from pyspark.sql.types import (
 from pyspark.ml import PipelineModel
 import os
 import sys
+import traceback
 import psycopg2
 from psycopg2 import extras
 
@@ -56,7 +57,7 @@ try:
         .config("spark.sql.execution.arrow.pyspark.enabled", "false") \
         .getOrCreate()
     
-    print("Spark Session created successfully in local mode")
+    print("Spark Session created successfully")
 except Exception as e:
     print(f"Failed to create Spark session: {e}")
     sys.exit(1)
@@ -164,61 +165,171 @@ parsed_df = kafka_stream_df \
 
 print("Parsing Kafka messages...")
 
-# Apply transformations in batches to avoid deep query plans
 def process_batch(batch_df, batch_id):
     try:
-        print(f"Processing batch {batch_id} with {batch_df.count()} records")
-        
-        if batch_df.count() == 0:
-            print("Empty batch, skipping...")
-            return
-
-        transformed_df = batch_df \
-            .withColumn("trans_date_trans_time", 
-                       to_timestamp(col("trans_date_trans_time"), "yyyy-MM-dd HH:mm:ss")) \
-            .withColumn("hour", hour(col("trans_date_trans_time"))) \
-            .withColumn("day_of_week", dayofweek(col("trans_date_trans_time"))) \
-            .withColumn("distance", 
-                       haversine_udf(col("lat"), col("long"), col("merch_lat"), col("merch_long"))) \
-            .withColumn("dob_date", to_date(col("dob"))) \
-            .withColumn("transaction_date", to_date(col("trans_date_trans_time"))) \
-            .withColumn("age", floor(datediff(col("transaction_date"), col("dob_date")) / 365.25)) \
-            .withColumn("daily_spending", col("amt")) \
-            .withColumn("daily_transactions", lit(1.0)) \
-            .withColumn("class_weight", lit(1.0)) \
-            .withColumn("indexedLabel", col("is_fraud").cast(DoubleType())) \
-            .drop("dob_date", "transaction_date")
-
-        print("Applying ML model...")
-
-        predictions_df = loaded_pipeline_model.transform(transformed_df)
-        
-        # Extract probability and make final predictions
-        final_df = predictions_df \
-            .withColumn("fraud_probability", extract_prob_udf(col("probability"))) \
-            .withColumn("is_fraud_predicted", 
-                       when(col("fraud_probability") >= CONSUMER_FRAUD_THRESHOLD, 1.0).otherwise(0.0))
-        
-        # Select final columns and show results
-        result_df = final_df.select(
-            col("trans_num"),
-            col("amt"),
-            col("category"),
-            col("trans_date_trans_time"),
-            col("is_fraud").alias("actual_fraud"),
-            col("fraud_probability"),
-            col("is_fraud_predicted").alias("predicted_label")
-        )
-        
-        print("=== Fraud Detection Results ===")
-        result_df.show(20, truncate=False)
-        
-        # Saving log to database will be added later
-        
+        result_df, all_transactions_df, fraud_transactions_df = transform_and_predict(batch_df, batch_id)
+        if result_df is not None:
+            save_to_postgres(all_transactions_df, fraud_transactions_df)
     except Exception as e:
         print(f"Error processing batch {batch_id}: {e}")
-        import traceback
         traceback.print_exc()
+
+def get_db_connection():
+    return psycopg2.connect(
+        host=PG_HOST,
+        port=PG_PORT,
+        database=PG_DB,
+        user=PG_USER,
+        password=PG_PASSWORD
+    )
+
+def transform_and_predict(batch_df, batch_id):
+    print(f"Processing batch {batch_id} with {batch_df.count()} records")
+
+    if batch_df.count() == 0:
+        print("Empty batch, skipping...")
+        return None, None, None
+
+    transformed_df = batch_df \
+        .withColumn("trans_date_trans_time", 
+                   to_timestamp(col("trans_date_trans_time"), "yyyy-MM-dd HH:mm:ss")) \
+        .withColumn("hour", hour(col("trans_date_trans_time"))) \
+        .withColumn("day_of_week", dayofweek(col("trans_date_trans_time"))) \
+        .withColumn("distance", 
+                   haversine_udf(col("lat"), col("long"), col("merch_lat"), col("merch_long"))) \
+        .withColumn("dob_date", to_date(col("dob"))) \
+        .withColumn("transaction_date", to_date(col("trans_date_trans_time"))) \
+        .withColumn("age", floor(datediff(col("transaction_date"), col("dob_date")) / 365.25)) \
+        .withColumn("daily_spending", col("amt")) \
+        .withColumn("daily_transactions", lit(1.0)) \
+        .withColumn("class_weight", lit(1.0)) \
+        .withColumn("indexedLabel", col("is_fraud").cast(DoubleType())) \
+        .drop("dob_date", "transaction_date")
+
+    print("Applying ML model...")
+    predictions_df = loaded_pipeline_model.transform(transformed_df)
+
+    final_df = predictions_df \
+        .withColumn("fraud_probability", extract_prob_udf(col("probability"))) \
+        .withColumn("is_fraud_predicted", 
+                   when(col("fraud_probability") >= CONSUMER_FRAUD_THRESHOLD, 1.0).otherwise(0.0))
+
+    result_df = final_df.select(
+        col("trans_num"),
+        col("amt"),
+        col("category"),
+        col("trans_date_trans_time"),
+        col("is_fraud").alias("actual_fraud"),
+        col("fraud_probability"),
+        col("is_fraud_predicted").alias("predicted_label")
+    )
+    
+    print("=== Fraud Detection Results ===")
+    result_df.show(20, truncate=False)
+
+    all_transactions_df = batch_df.select(
+        col("trans_num"),
+        to_timestamp(col("trans_date_trans_time"), "yyyy-MM-dd HH:mm:ss").alias("trans_date_trans_time"),
+        col("cc_num"),
+        col("merchant"),
+        col("category"),
+        col("amt"),
+        col("first").alias("first_name"),
+        col("last").alias("last_name"),
+        col("gender"),
+        col("street"),
+        col("city"),
+        col("state"),
+        col("zip"),
+        col("lat"),
+        col("long"),
+        col("city_pop"),
+        col("job"),
+        to_date(col("dob")).alias("dob"),
+        col("unix_time"),
+        col("merch_lat"),
+        col("merch_long"),
+        col("is_fraud")
+    )
+
+    fraud_transactions_df = final_df.select(
+        col("trans_num"),
+        col("amt"),
+        col("category"),
+        col("trans_date_trans_time"),
+        col("is_fraud").alias("actual_fraud"),
+        col("fraud_probability"),
+        col("is_fraud_predicted").alias("predicted_label")
+    ).filter(col("is_fraud_predicted") == 1.0)
+
+    return result_df, all_transactions_df, fraud_transactions_df
+
+def save_to_postgres(all_transactions_df, fraud_transactions_df):
+    try:
+        all_transactions_pandas_df = all_transactions_df.toPandas()
+        fraud_transactions_pandas_df = fraud_transactions_df.toPandas()
+
+        if all_transactions_pandas_df.empty and fraud_transactions_pandas_df.empty:
+            print("No data to insert into PostgreSQL.")
+            return
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        if not all_transactions_pandas_df.empty:
+            all_cols = [
+                "trans_num", "trans_date_trans_time", "cc_num", "merchant", "category", "amt",
+                "first_name", "last_name", "gender", "street", "city", "state", "zip",
+                "lat", "long", "city_pop", "job", "dob", "unix_time", "merch_lat",
+                "merch_long", "is_fraud"
+            ]
+            all_values = all_transactions_pandas_df[all_cols].values.tolist()
+
+            insert_all_sql = f"""
+                INSERT INTO all_transactions ({', '.join(all_cols)})
+                VALUES %s
+                ON CONFLICT (trans_num) DO NOTHING;
+            """
+            extras.execute_values(cur, insert_all_sql, all_values)
+            print(f"Inserted {len(all_transactions_pandas_df)} records into all_transactions.")
+
+        if not fraud_transactions_pandas_df.empty:
+            fraud_cols = [
+                "trans_num", "amt", "category", "trans_date_trans_time",
+                "actual_fraud", "fraud_probability", "predicted_label"
+            ]
+            fraud_values = fraud_transactions_pandas_df[fraud_cols].values.tolist()
+
+            insert_fraud_sql = f"""
+                INSERT INTO fraud_transactions ({', '.join(fraud_cols)})
+                VALUES %s
+                ON CONFLICT (trans_num) DO UPDATE SET
+                    amt = EXCLUDED.amt,
+                    category = EXCLUDED.category,
+                    trans_date_trans_time = EXCLUDED.trans_date_trans_time,
+                    actual_fraud = EXCLUDED.actual_fraud,
+                    fraud_probability = EXCLUDED.fraud_probability,
+                    predicted_label = EXCLUDED.predicted_label;
+            """
+            extras.execute_values(cur, insert_fraud_sql, fraud_values)
+            print(f"Inserted/Updated {len(fraud_transactions_pandas_df)} fraud records into fraud_transactions.")
+
+        conn.commit()
+
+    except psycopg2.Error as db_err:
+        print(f"Database error: {db_err}")
+        if conn:
+            conn.rollback()
+        traceback.print_exc()
+    except Exception as ex:
+        print(f"An unexpected error occurred during database insert: {ex}")
+        if conn:
+            conn.rollback()
+        traceback.print_exc()
+    finally:
+        if conn:
+            cur.close()
+            conn.close()
 
 # Use foreachBatch for better control
 print("Starting streaming query...")
@@ -239,7 +350,6 @@ except KeyboardInterrupt:
     spark.stop()
 except Exception as e:
     print(f"Error in streaming query: {e}")
-    import traceback
     traceback.print_exc()
     query.stop()
     spark.stop()

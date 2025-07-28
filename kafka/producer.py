@@ -11,7 +11,7 @@ KAFKA_BROKER_URL = os.getenv('KAFKA_BROKER_URL', 'kafka:29092')
 TOPIC_NAME = os.getenv('KAFKA_TOPIC_NAME', 'raw_transactions')
 CSV_FILE_PATH = os.getenv('PRODUCER_CSV_FILE', 'fraudTest.csv')
 OFFSET_FILE_PATH = '/app/data/producer_offset.txt'
-SAVE_INTERVAL = int(os.getenv('PRODUCER_SAVE_INTERVAL', '50'))  # Save every N records
+SAVE_INTERVAL = int(os.getenv('PRODUCER_SAVE_INTERVAL', '50'))
 
 # Global variables for signal handling
 current_offset = -1
