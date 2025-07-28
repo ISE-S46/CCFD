@@ -1,5 +1,5 @@
-# CCFD
-Credit Cards Fraud Detection (CCFD) project aims to identify potential fraud credit card transaction utilising machine learning, and alert the detected transaction on a graph.
+# Credit Card Fraud Detection (CCFD)
+Identify potential fraud credit card transaction utilising Pyspark MLlib and alert the detected transaction with grafana realtime graph.
 
 Technologies used:
 - Pyspark
@@ -34,7 +34,7 @@ cd ccfd
 ```
 
 ### Jupyter/Pyspark-notebook Docker Container setup (Optional):
-#### Run this container if you don't have pyspark installed in your pc 
+#### Run this container if you don't have pyspark installed in your machine 
 ```bash
 docker build -t pyspark_env .
 docker run -d -p 8888:8888 -v ${pwd}:/app -p 4040:4040 --name pyspark_env pyspark_env 
@@ -73,13 +73,6 @@ docker-compose -f Database/docker-compose.yml up -d
 ### Access Grafana at http://localhost:3000
 #### In this example, username is admin and password is password.
 ![Grafana](ReadmeImg/Grafana.png)
-### Manually add PostgreSQL datasource to grafana:
-#### Select Connections -> Data sources -> add new data sources
-![Grafana](ReadmeImg/Datasource1.png)
-#### password is password
-![Grafana](ReadmeImg/Datasource2.png)
-#### Save & test should look like this
-![Grafana](ReadmeImg/Datasource3.png)
 
 ### Creating graph
 ![Grafana](ReadmeImg/Graph1.png)

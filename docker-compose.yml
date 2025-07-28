@@ -164,6 +164,26 @@ services:
       --conf spark.sql.warehouse.dir=/tmp/spark-warehouse
       /app/consumer.py
 
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - CCFD-net
+    restart: unless-stopped
+
 volumes:
   zookeeper_data:
     name: CCFD-zookeeper-data
@@ -175,6 +195,8 @@ volumes:
     name: CCFD-consumer-checkpoints
   producer_data:
     name: CCFD-producer-data
+  grafana_data:
+    name: CCFD-grafana-data
 
 networks:
   CCFD-net:

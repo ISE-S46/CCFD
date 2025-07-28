@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres:${POSTGRES_PORT}
+    user: ${POSTGRES_USER}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    database: ${POSTGRES_DB}
+    isDefault: true
+    jsonData:
+      sslmode: disable
