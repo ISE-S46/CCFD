@@ -3,6 +3,7 @@ import json
 from kafka import KafkaProducer
 import time
 import sys
+import signal
 from datetime import datetime
 import os
 
@@ -10,6 +11,11 @@ KAFKA_BROKER_URL = os.getenv('KAFKA_BROKER_URL', 'kafka:29092')
 TOPIC_NAME = os.getenv('KAFKA_TOPIC_NAME', 'raw_transactions')
 CSV_FILE_PATH = os.getenv('PRODUCER_CSV_FILE', 'fraudTest.csv')
 OFFSET_FILE_PATH = '/app/data/producer_offset.txt'
+SAVE_INTERVAL = int(os.getenv('PRODUCER_SAVE_INTERVAL', '50'))  # Save every N records
+
+# Global variables for signal handling
+current_offset = -1
+offset_lock = False
 
 def create_kafka_producer():
     try:
@@ -18,11 +24,8 @@ def create_kafka_producer():
             value_serializer=lambda v: json.dumps(v).encode('utf-8'),
             api_version=(0, 10, 1)
         )
-
         print(f"Successfully connected to Kafka at {KAFKA_BROKER_URL}")
-
         return producer
-
     except Exception as e:
         print(f"Error connecting to Kafka: {e}")
         sys.exit(1)
@@ -42,19 +45,48 @@ def get_last_offset():
         return -1
 
 def save_offset(row_number):
+    global offset_lock
+    if offset_lock:
+        return
+    
     try:
+        offset_lock = True
         os.makedirs(os.path.dirname(OFFSET_FILE_PATH), exist_ok=True)
-        with open(OFFSET_FILE_PATH, 'w') as f:
+
+        temp_file = OFFSET_FILE_PATH + '.tmp'
+        with open(temp_file, 'w') as f:
             f.write(str(row_number))
+        os.rename(temp_file, OFFSET_FILE_PATH)
+        
     except Exception as e:
         print(f"Error saving offset: {e}")
+    finally:
+        offset_lock = False
+
+def signal_handler(signum, frame):
+    global current_offset
+    print(f"\nReceived signal {signum}. Flushing producer and saving current progress at offset {current_offset}...")
+
+    try:
+        producer.flush(timeout=30) # Wait up to 30 seconds for all messages to be sent
+        print("Producer flushed successfully")
+    except Exception as e:
+        print(f"Error flushing producer: {e}")
+    
+    if current_offset >= 0:
+        save_offset(current_offset)
+    print("Progress saved. Exiting gracefully.")
+    sys.exit(0)
 
 def produce_messages(producer):
+    global current_offset
+    
     print(f"Starting to read from {CSV_FILE_PATH} and send to topic {TOPIC_NAME}")
 
     last_transaction_time = None
     first_transaction_wall_time = time.time()
     last_offset = get_last_offset()
+    current_offset = last_offset
     
     try:
         with open(CSV_FILE_PATH, mode='r', encoding='utf-8') as file:
@@ -64,7 +96,6 @@ def produce_messages(producer):
                 print("Error: 'trans_date_trans_time' column not found in CSV header.")
                 sys.exit(1)
 
-            # Convert to list to allow skipping rows
             rows = list(csv_reader)
             total_rows = len(rows)
             
@@ -74,9 +105,11 @@ def produce_messages(producer):
             for i, row in enumerate(rows):
                 if i <= last_offset:
                     continue
+                
+                current_offset = i
                     
                 try:
-                    # Numeric conversions
+                    # Data type conversions
                     row['amt'] = float(row.get('amt', 0.0))
                     row['zip'] = int(row.get('zip', 0))
                     row['lat'] = float(row.get('lat', 0.0))
@@ -87,7 +120,7 @@ def produce_messages(producer):
                     row['merch_long'] = float(row.get('merch_long', 0.0))
                     row['is_fraud'] = int(row.get('is_fraud', 0))
 
-                    # String conversions (ensure they exist, even if empty)
+                    # String conversions
                     row['cc_num'] = row.get('cc_num', '')
                     row['merchant'] = row.get('merchant', '')
                     row['category'] = row.get('category', '')
@@ -112,21 +145,29 @@ def produce_messages(producer):
 
                     last_transaction_time = current_trans_time_dt
 
-                    producer.send(TOPIC_NAME, value=row)
+                    # Send message and wait for acknowledgment
+                    future = producer.send(TOPIC_NAME, value=row)
+                    try:
+                        # Wait for acknowledgment with timeout
+                        record_metadata = future.get(timeout=10)
+                        print(f"Message sent successfully to {record_metadata.topic} partition {record_metadata.partition} offset {record_metadata.offset}")
+                    except Exception as send_error:
+                        print(f"Failed to send message for row {i+1}: {send_error}")
+                        continue
 
-                    if i % 10 == 0:
+                    # Save offset periodically and on important milestones
+                    if (i - last_offset) % SAVE_INTERVAL == 0 or i == len(rows) - 1:
                         save_offset(i)
                         print(f"Sent {i+1} messages (total processed: {i - last_offset}). Last message trans_num: {row['trans_num']} at {current_trans_time_str}")
 
-                    if i == len(rows) - 1:
-                        save_offset(i)
-
                 except ValueError as ve:
-                    print(f"Skipping row {i+1} due to data type conversion error: {ve} - Row: {row}")
-                    save_offset(i) 
+                    print(f"Skipping row {i+1} due to data type conversion error: {ve}")
+                    if (i - last_offset) % SAVE_INTERVAL == 0:
+                        save_offset(i)
                 except Exception as e:
                     print(f"Error sending message for row {i+1}: {e}")
-                    save_offset(i)
+                    if (i - last_offset) % SAVE_INTERVAL == 0:
+                        save_offset(i)
 
             print(f"Finished processing all rows. Final offset saved: {len(rows) - 1}")
 
@@ -135,14 +176,18 @@ def produce_messages(producer):
         sys.exit(1)
     except KeyboardInterrupt:
         print("\nReceived interrupt signal, saving current progress...")
+        save_offset(current_offset)
         sys.exit(0)
     finally:
         producer.flush()
         total_wall_time = time.time() - first_transaction_wall_time
         print(f"\nFinished sending messages. Total wall clock time: {total_wall_time:.2f} seconds.")
 
-
 if __name__ == "__main__":
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
     print("Waiting for Kafka broker to be available...")
     time.sleep(30)
 

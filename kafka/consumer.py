@@ -204,6 +204,7 @@ def process_batch(batch_df, batch_id):
             col("trans_num"),
             col("amt"),
             col("category"),
+            col("trans_date_trans_time"),
             col("is_fraud").alias("actual_fraud"),
             col("fraud_probability"),
             col("is_fraud_predicted").alias("predicted_label")

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS fraud_transactions (
     trans_num VARCHAR(255) UNIQUE,
     amt NUMERIC(10, 2),
     category VARCHAR(255),
+    trans_date_trans_time TIMESTAMP,
     actual_fraud INTEGER,
     fraud_probability NUMERIC(5, 4),
     predicted_label NUMERIC(1, 0),
