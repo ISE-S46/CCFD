@@ -1,6 +1,6 @@
 # Credit Card Fraud Detection (CCFD)
 
-![GitHub License](https://img.shields.io/github/license/ISE-S46/CCFD?cacheSeconds=60)
+![GitHub License](https://img.shields.io/github/license/ISE-S46/CCFD)
 ![GitHub repo size](https://img.shields.io/github/repo-size/ISE-S46/CCFD?cacheSeconds=60)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/ISE-S46/CCFD?cacheSeconds=60)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues-pr/ISE-S46/CCFD?cacheSeconds=60)
