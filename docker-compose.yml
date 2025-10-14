@@ -18,6 +18,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -45,6 +46,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   producer:
     build:
@@ -67,9 +69,12 @@ services:
     restart: unless-stopped
 
   spark-master:
-    image: bitnami/spark:4.0.0
-    hostname: spark-master
+    image: spark:4.0.0-python3
     container_name: spark-master
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      -h spark-master
+    hostname: spark-master
     ports:
       - "8080:8080" # Spark Master UI
       - "7077:7077" # Spark Master internal communication
@@ -79,28 +84,43 @@ services:
       SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED}
       SPARK_LOCAL_DIRS: ${SPARK_LOCAL_DIRS}
       SPARK_LOG_DIR: ${SPARK_LOG_DIR}
+      SPARK_MASTER_HOST: ${SPARK_MASTER_HOST}
+      SPARK_MASTER_PORT: ${SPARK_MASTER_PORT}
+      SPARK_MASTER_WEBUI_PORT: ${SPARK_MASTER_WEBUI_PORT}
+    volumes:
+      - shared-data:/opt/spark/data
     networks:
       - CCFD-net
+    restart: unless-stopped
 
   spark-worker:
     build:
       context: ./kafka
       dockerfile: Dockerfile.worker
-    hostname: spark-worker
     container_name: spark-worker
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+    hostname: spark-worker
     depends_on:
       - spark-master
+    ports:
+      - "8081:8081"
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: ${SPARK_MASTER_URL}
       SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
+      SPARK_WORKER_WEBUI_PORT: ${SPARK_WORKER_WEBUI_PORT}
       SPARK_RPC_AUTHENTICATION_ENABLED: ${SPARK_RPC_AUTHENTICATION_ENABLED}
       SPARK_RPC_ENCRYPTION_ENABLED: ${SPARK_RPC_ENCRYPTION_ENABLED}
       SPARK_LOCAL_DIRS: ${SPARK_LOCAL_DIRS}
       SPARK_LOG_DIR: ${SPARK_LOG_DIR}
+    volumes:
+      - shared-data:/opt/spark/data
     networks:
       - CCFD-net
+    restart: unless-stopped
 
   postgres:
     image: postgres:17
@@ -122,6 +142,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   spark-consumer:
     build:
@@ -129,9 +150,12 @@ services:
       dockerfile: Dockerfile.consumer
     container_name: fraud-consumer
     depends_on:
-      - kafka
-      - postgres
-      - producer
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      producer:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -147,10 +171,9 @@ services:
           memory: 4G
         reservations:
           memory: 2G
-    # Add user specification to ensure proper permissions
     user: "1001:1001"
     command: >
-      /opt/bitnami/spark/bin/spark-submit
+      /opt/spark/bin/spark-submit
       --master ${SPARK_MASTER_URL}
       --packages org.apache.spark:spark-sql-kafka-0-10_2.13:${SPARK_KAFKA_PACKAGE_VERSION}
       --conf spark.sql.shuffle.partitions=${SPARK_SQL_SHUFFLE_PARTITIONS}
@@ -163,6 +186,7 @@ services:
       --conf spark.local.dir=/tmp/spark-local
       --conf spark.sql.warehouse.dir=/tmp/spark-warehouse
       /app/consumer.py
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:10.2.2
@@ -197,6 +221,8 @@ volumes:
     name: CCFD-producer-data
   grafana_data:
     name: CCFD-grafana-data
+  shared-data:
+    name: CCFD-spark-data
 
 networks:
   CCFD-net:

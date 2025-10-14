@@ -76,13 +76,19 @@ SPARK_MASTER_URL=spark://spark-master:7077
 SPARK_RPC_AUTHENTICATION_ENABLED=no
 SPARK_RPC_ENCRYPTION_ENABLED=no
 SPARK_LOCAL_DIRS=/tmp/spark-events
-SPARK_LOG_DIR=/opt/bitnami/spark/logs
+SPARK_LOG_DIR=/opt/spark/logs
 SPARK_SERIALIZER=org.apache.spark.serializer.KryoSerializer
 SPARK_KAFKA_PACKAGE_VERSION=4.0.0
+
+# Spark Master
+SPARK_MASTER_HOST=spark-master
+SPARK_MASTER_PORT=7077
+SPARK_MASTER_WEBUI_PORT=8080
 
 # Spark Resource Allocation
 SPARK_WORKER_CORES=1
 SPARK_WORKER_MEMORY=1G
+SPARK_WORKER_WEBUI_PORT=8081
 SPARK_DRIVER_MEMORY=1g
 SPARK_EXECUTOR_MEMORY=1g
 SPARK_EXECUTOR_CORES=1
@@ -93,6 +99,7 @@ SPARK_DRIVER_MAX_RESULT_SIZE=1g
 SPARK_STREAMING_TRIGGER_TIME=10 seconds
 SPARK_STREAMING_MAX_OFFSETS_PER_TRIGGER=1000
 CONSUMER_FRAUD_THRESHOLD=0.75
+CONSUMER_CHECKPOINT_PATH=/app/spark_checkpoints
 
 # File used for producer
 PRODUCER_CSV_FILE=fraudTest.csv # Change this to Test.csv for testing
@@ -156,12 +163,17 @@ ORDER BY
 ## Uninstall / Reinstall
 ```bash
 docker-compose down -v --rmi all
+
+or
+
+docker-compose down --volumes
 ```
 
 
 ## Technologies Used:
 - Pyspark
 - Pyspark MLlib
+- Python
 - Kafka
 - PostgreSQL
 - Grafana

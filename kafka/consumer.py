@@ -17,7 +17,7 @@ from psycopg2 import extras
 KAFKA_BROKER_URL = os.getenv('KAFKA_BROKER_URL', 'kafka:29092')
 TOPIC_NAME = os.getenv('KAFKA_TOPIC_NAME', 'raw_transactions')
 MODEL_PATH = '/app/Pipeline'
-CHECKPOINT_PATH = os.getenv('CONSUMER_CHECKPOINT_PATH', '/tmp/checkpoints')
+CHECKPOINT_PATH = os.getenv('CONSUMER_CHECKPOINT_PATH', '/app/spark_checkpoints')
 
 SPARK_MASTER_URL = os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077')
 SPARK_DRIVER_MEMORY = os.getenv('SPARK_DRIVER_MEMORY', '1g')

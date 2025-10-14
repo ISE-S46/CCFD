@@ -1,11 +1,13 @@
-FROM bitnami/spark:4.0.0
+FROM spark:4.0.0-python3
+
+USER root
 
 WORKDIR /app
 COPY consumer_requirements.txt .
 RUN pip install --no-cache-dir -r consumer_requirements.txt
 COPY Pipeline /app/Pipeline
 
-USER root
 RUN chown -R 1001:1001 /app/Pipeline && \
     chmod -R 755 /app/Pipeline
-USER 1001
+    
+USER spark

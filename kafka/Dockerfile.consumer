@@ -1,6 +1,8 @@
-FROM bitnami/spark:4.0.0
+FROM spark:4.0.0-python3
 
 USER root
+
+RUN /opt/spark/bin/spark-shell --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 --repositories https://repos.spark-packages.org/ || true
 
 WORKDIR /app
 COPY consumer_requirements.txt .
@@ -9,14 +11,8 @@ COPY Pipeline /app/Pipeline
 COPY consumer.py .
 
 RUN mkdir -p /home/sparkuser && \
+    mkdir -p /home/sparkuser/.ivy2 && \
     mkdir -p /app/spark_checkpoints && \
-    mkdir -p /app/Pipeline/checkpoints && \
-    mkdir -p /tmp/spark-local && \
-    mkdir -p /tmp/spark-warehouse && \
-    mkdir -p /tmp/checkpoints && \
-    mkdir -p /tmp/derby && \
-    mkdir -p /tmp/spark-events && \
-    mkdir -p /tmp/hive && \
     chown -R 1001:1001 /home/sparkuser && \
     chown -R 1001:1001 /app && \
     chown -R 1001:1001 /tmp && \
@@ -24,11 +20,14 @@ RUN mkdir -p /home/sparkuser && \
     chmod -R 755 /app && \
     chmod -R 755 /tmp
 
+RUN echo "sparkuser:x:1001:1001::/home/sparkuser:/bin/bash" >> /etc/passwd
 USER 1001
 
+ENV USER=sparkuser
 ENV HOME=/home/sparkuser
-ENV SPARK_HOME=/opt/bitnami/spark
+ENV HADOOP_USER_NAME=sparkuser
+ENV SPARK_HOME=/opt/spark
 ENV PATH=$SPARK_HOME/bin:$PATH
 ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.7-src.zip:$PYTHONPATH
-ENV SPARK_LOCAL_DIRS=/tmp/spark-local
-ENV SPARK_SQL_WAREHOUSE_DIR=/tmp/spark-warehouse
+ENV IVY_HOME=/home/sparkuser/.ivy2
+ENV _JAVA_OPTIONS=-Duser.home=/home/sparkuser
