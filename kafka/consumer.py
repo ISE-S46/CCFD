@@ -1,4 +1,4 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Column
 from pyspark.sql.functions import (
     col, from_json, to_timestamp, hour, dayofweek,
     to_date, datediff, floor, radians, cos, sin, atan2, sqrt,
@@ -114,29 +114,13 @@ def extract_probability(probability_vector):
 
 extract_prob_udf = udf(extract_probability, DoubleType())
 
-# Haversine distance UDF
-def haversine_distance(lat1, lon1, lat2, lon2):
-    try:
-        if any(x is None for x in [lat1, lon1, lat2, lon2]):
-            return 0.0
-        
-        R = 6371
-        lat1_rad = radians(lat1)
-        lon1_rad = radians(lon1)
-        lat2_rad = radians(lat2)
-        lon2_rad = radians(lon2)
-        
-        dlat = lat2_rad - lat1_rad
-        dlon = lon2_rad - lon1_rad
-        
-        a = sin(dlat / 2) ** 2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2) ** 2
-        c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        
-        return R * c
-    except Exception:
-        return 0.0
-
-haversine_udf = udf(haversine_distance, DoubleType())
+def haversine_distance_spark(lat1: Column, lon1: Column, lat2: Column, lon2: Column) -> Column:
+    R = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return when(lat1.isNotNull() & lon1.isNotNull() & lat2.isNotNull() & lon2.isNotNull(), R * c).otherwise(0.0)
 
 print(f"Connecting to Kafka topic: {TOPIC_NAME}")
 
@@ -184,48 +168,13 @@ def get_db_connection():
     )
 
 def transform_and_predict(batch_df, batch_id):
-    print(f"Processing batch {batch_id} with {batch_df.count()} records")
+    record_count = batch_df.cache().count()
+    print(f"Processing batch {batch_id} with {record_count} records")
 
-    if batch_df.count() == 0:
+    if record_count == 0:
         print("Empty batch, skipping...")
+        batch_df.unpersist()
         return None, None, None
-
-    transformed_df = batch_df \
-        .withColumn("trans_date_trans_time", 
-                   to_timestamp(col("trans_date_trans_time"), "yyyy-MM-dd HH:mm:ss")) \
-        .withColumn("hour", hour(col("trans_date_trans_time"))) \
-        .withColumn("day_of_week", dayofweek(col("trans_date_trans_time"))) \
-        .withColumn("distance", 
-                   haversine_udf(col("lat"), col("long"), col("merch_lat"), col("merch_long"))) \
-        .withColumn("dob_date", to_date(col("dob"))) \
-        .withColumn("transaction_date", to_date(col("trans_date_trans_time"))) \
-        .withColumn("age", floor(datediff(col("transaction_date"), col("dob_date")) / 365.25)) \
-        .withColumn("daily_spending", col("amt")) \
-        .withColumn("daily_transactions", lit(1.0)) \
-        .withColumn("class_weight", lit(1.0)) \
-        .withColumn("indexedLabel", col("is_fraud").cast(DoubleType())) \
-        .drop("dob_date", "transaction_date")
-
-    print("Applying ML model...")
-    predictions_df = loaded_pipeline_model.transform(transformed_df)
-
-    final_df = predictions_df \
-        .withColumn("fraud_probability", extract_prob_udf(col("probability"))) \
-        .withColumn("is_fraud_predicted", 
-                   when(col("fraud_probability") >= CONSUMER_FRAUD_THRESHOLD, 1.0).otherwise(0.0))
-
-    result_df = final_df.select(
-        col("trans_num"),
-        col("amt"),
-        col("category"),
-        col("trans_date_trans_time"),
-        col("is_fraud").alias("actual_fraud"),
-        col("fraud_probability"),
-        col("is_fraud_predicted").alias("predicted_label")
-    )
-    
-    print("=== Fraud Detection Results ===")
-    result_df.show(20, truncate=False)
 
     all_transactions_df = batch_df.select(
         col("trans_num"),
@@ -252,7 +201,32 @@ def transform_and_predict(batch_df, batch_id):
         col("is_fraud")
     )
 
-    fraud_transactions_df = final_df.select(
+    batch_df.unpersist()
+
+    transformed_df = all_transactions_df \
+        .withColumn("trans_date_trans_time", 
+                    to_timestamp(col("trans_date_trans_time"), "yyyy-MM-dd HH:mm:ss")) \
+        .withColumn("hour", hour(col("trans_date_trans_time"))) \
+        .withColumn("day_of_week", dayofweek(col("trans_date_trans_time"))) \
+        .withColumn("distance", haversine_distance_spark(col("lat"), col("long"), col("merch_lat"), col("merch_long"))) \
+        .withColumn("dob_date", to_date(col("dob"))) \
+        .withColumn("transaction_date", to_date(col("trans_date_trans_time"))) \
+        .withColumn("age", floor(datediff(col("transaction_date"), col("dob_date")) / 365.25)) \
+        .withColumn("daily_spending", col("amt")) \
+        .withColumn("daily_transactions", lit(1.0)) \
+        .withColumn("class_weight", lit(1.0)) \
+        .withColumn("indexedLabel", col("is_fraud").cast(DoubleType())) \
+        .drop("dob_date", "transaction_date")
+
+    print("Applying ML model...")
+    predictions_df = loaded_pipeline_model.transform(transformed_df)
+
+    final_df = predictions_df \
+        .withColumn("fraud_probability", extract_prob_udf(col("probability"))) \
+        .withColumn("is_fraud_predicted", 
+                    when(col("fraud_probability") >= CONSUMER_FRAUD_THRESHOLD, 1.0).otherwise(0.0))
+
+    result_df = final_df.select(
         col("trans_num"),
         col("amt"),
         col("category"),
@@ -260,7 +234,12 @@ def transform_and_predict(batch_df, batch_id):
         col("is_fraud").alias("actual_fraud"),
         col("fraud_probability"),
         col("is_fraud_predicted").alias("predicted_label")
-    ).filter(col("is_fraud_predicted") == 1.0)
+    )
+
+    fraud_transactions_df = final_df.filter(col("is_fraud_predicted") == 1.0)
+
+    print("=== Fraud Detection Results ===")
+    result_df.show(20, truncate=False)
 
     return result_df, all_transactions_df, fraud_transactions_df
 
@@ -312,9 +291,10 @@ def save_to_postgres(all_transactions_df, fraud_transactions_df):
                     predicted_label = EXCLUDED.predicted_label;
             """
             extras.execute_values(cur, insert_fraud_sql, fraud_values)
-            print(f"Inserted/Updated {len(fraud_transactions_pandas_df)} fraud records into fraud_transactions.")
 
         conn.commit()
+        cur.close()
+        conn.close()
 
     except psycopg2.Error as db_err:
         print(f"Database error: {db_err}")
