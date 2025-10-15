@@ -236,7 +236,17 @@ def transform_and_predict(batch_df, batch_id):
         col("is_fraud_predicted").alias("predicted_label")
     )
 
-    fraud_transactions_df = final_df.filter(col("is_fraud_predicted") == 1.0)
+    fraud_transactions_df = final_df \
+        .filter(col("is_fraud_predicted") == 1.0) \
+        .select(
+            col("trans_num"),
+            col("amt"),
+            col("category"),
+            col("trans_date_trans_time"),
+            col("is_fraud").alias("actual_fraud"),
+            col("fraud_probability"),
+            col("is_fraud_predicted").alias("predicted_label")
+        )
 
     print("=== Fraud Detection Results ===")
     result_df.show(20, truncate=False)
@@ -244,18 +254,22 @@ def transform_and_predict(batch_df, batch_id):
     return result_df, all_transactions_df, fraud_transactions_df
 
 def save_to_postgres(all_transactions_df, fraud_transactions_df):
-    try:
-        all_transactions_pandas_df = all_transactions_df.toPandas()
-        fraud_transactions_pandas_df = fraud_transactions_df.toPandas()
+    conn = None
+    cur = None
 
-        if all_transactions_pandas_df.empty and fraud_transactions_pandas_df.empty:
-            print("No data to insert into PostgreSQL.")
+    try:
+        all_transactions_pandas_df = all_transactions_df.toPandas() if all_transactions_df is not None else None
+        fraud_transactions_pandas_df = fraud_transactions_df.toPandas() if fraud_transactions_df is not None else None
+
+        if (all_transactions_pandas_df is None or all_transactions_pandas_df.empty) and \
+           (fraud_transactions_pandas_df is None or fraud_transactions_pandas_df.empty):
+            print("ℹ️ No data to insert into PostgreSQL.")
             return
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        if not all_transactions_pandas_df.empty:
+        if all_transactions_pandas_df is not None and not all_transactions_pandas_df.empty:
             all_cols = [
                 "trans_num", "trans_date_trans_time", "cc_num", "merchant", "category", "amt",
                 "first_name", "last_name", "gender", "street", "city", "state", "zip",
@@ -270,15 +284,14 @@ def save_to_postgres(all_transactions_df, fraud_transactions_df):
                 ON CONFLICT (trans_num) DO NOTHING;
             """
             extras.execute_values(cur, insert_all_sql, all_values)
-            print(f"Inserted {len(all_transactions_pandas_df)} records into all_transactions.")
+            print(f"Inserted {len(all_values)} records into all_transactions.")
 
-        if not fraud_transactions_pandas_df.empty:
+        if fraud_transactions_pandas_df is not None and not fraud_transactions_pandas_df.empty:
             fraud_cols = [
                 "trans_num", "amt", "category", "trans_date_trans_time",
                 "actual_fraud", "fraud_probability", "predicted_label"
             ]
             fraud_values = fraud_transactions_pandas_df[fraud_cols].values.tolist()
-
             insert_fraud_sql = f"""
                 INSERT INTO fraud_transactions ({', '.join(fraud_cols)})
                 VALUES %s
@@ -291,10 +304,9 @@ def save_to_postgres(all_transactions_df, fraud_transactions_df):
                     predicted_label = EXCLUDED.predicted_label;
             """
             extras.execute_values(cur, insert_fraud_sql, fraud_values)
-
+            print(f"Inserted/Updated {len(fraud_values)} fraud records into fraud_transactions.")
+        
         conn.commit()
-        cur.close()
-        conn.close()
 
     except psycopg2.Error as db_err:
         print(f"Database error: {db_err}")
@@ -307,8 +319,9 @@ def save_to_postgres(all_transactions_df, fraud_transactions_df):
             conn.rollback()
         traceback.print_exc()
     finally:
-        if conn:
+        if cur:
             cur.close()
+        if conn:
             conn.close()
 
 # Use foreachBatch for better control
